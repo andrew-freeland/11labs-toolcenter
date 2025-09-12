@@ -1,0 +1,86 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions for validation
+    function isServiceAccount() {
+      return request.auth != null && 
+             request.auth.token.email.matches(".*@contract-gen-prototype.iam.gserviceaccount.com");
+    }
+
+    function isToolCenterServiceAccount() {
+      return request.auth != null && 
+             request.auth.token.email == "sa-tool-center-api@contract-gen-prototype.iam.gserviceaccount.com";
+    }
+
+    function hasRequiredPendingContactFields() {
+      let required = [
+        'raw_number', 'phone_number', 'business_name', 'contact_name',
+        'contact_email', 'contact_method', 'is_repeat', 'last_contact_date',
+        'created_date', 'call_count', 'license_number', 'business_address',
+        'trade_type', 'business_type', 'language_used', 'status', 'submittedBy',
+        'submittedAt', 'updatedAt'
+      ];
+      return request.resource.data.keys().hasAll(required);
+    }
+
+    function isValidContactMethod() {
+      return request.resource.data.contact_method in ['text', 'phone', 'email'];
+    }
+
+    function isValidBusinessType() {
+      return request.resource.data.business_type in ['LLC', 'INC.', 'Sole Proprietorship'];
+    }
+
+    function isValidEmail() {
+      return request.resource.data.contact_email.matches('.*@.*\\..*');
+    }
+
+    function isValidPhoneE164() {
+      return request.resource.data.phone_number.matches('\\+[1-9][0-9]{1,14}');
+    }
+
+    function isNonNegativeInteger(field) {
+      return request.resource.data[field] is int && request.resource.data[field] >= 0;
+    }
+
+    function isBoolean(field) {
+      return request.resource.data[field] is bool;
+    }
+
+    // Contacts collection: read-only access for tool-center-api service account
+    match /contacts/{phoneE164} {
+      // Only allow reads by the tool center service account
+      allow read: if isToolCenterServiceAccount();
+      
+      // No writes allowed through Firestore rules (only through admin/backoffice)
+      allow write: if false;
+    }
+
+    // Pending contacts collection: write access for tool-center-api with strict validation
+    match /pending_contacts/{docId} {
+      // Allow reads by tool center service account (for admin/backoffice operations)
+      allow read: if isToolCenterServiceAccount();
+      
+      // Allow creates and updates only by tool center service account with validation
+      allow create, update: if isToolCenterServiceAccount() &&
+        hasRequiredPendingContactFields() &&
+        isValidContactMethod() &&
+        isValidBusinessType() &&
+        isValidEmail() &&
+        isValidPhoneE164() &&
+        isNonNegativeInteger('call_count') &&
+        isBoolean('is_repeat') &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.submittedBy == 'sms-intake';
+      
+      // No deletes allowed
+      allow delete: if false;
+    }
+
+    // Default deny all other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

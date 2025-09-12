@@ -1,0 +1,163 @@
+tools:
+  - name: client_data
+    description: "ElevenLabs client initiation data webhook - provides caller context"
+    method: POST
+    path: /elevenlabs/client-data
+    auth: env(CALLER_INIT_TOKEN_V2)
+    fallback_auth:
+      - env(CALLER_REGISTRY_TOKEN)
+      - env(READ_SECRET)
+      - env(INTAKE_SECRET)
+    headers:
+      - Authorization: Bearer <token>
+      - Authorization: <token>
+      - X-Auth-Token: <token>
+    io:
+      input:
+        type: object
+        properties:
+          telephony:
+            type: object
+            properties:
+              from:
+                type: string
+                pattern: "^\\+[1-9]\\d{1,14}$"
+                description: "E.164 format phone number"
+          twilio:
+            type: object
+            properties:
+              From:
+                type: string
+                pattern: "^\\+[1-9]\\d{1,14}$"
+                description: "E.164 format phone number"
+          from:
+            type: string
+            pattern: "^\\+[1-9]\\d{1,14}$"
+            description: "E.164 format phone number"
+        oneOf:
+          - required: ["telephony"]
+          - required: ["twilio"]
+          - required: ["from"]
+      output:
+        type: object
+        required: ["type", "dynamic_variables"]
+        properties:
+          type:
+            type: string
+            enum: ["conversation_initiation_client_data"]
+          dynamic_variables:
+            type: object
+            properties:
+              memorycaller_status:
+                type: object
+                properties:
+                  business: { type: string }
+                  createdAt: { type: string, format: date-time }
+                  cslb: { type: string }
+                  digits: { type: string, pattern: "^[0-9]+$" }
+                  isRegistered: { type: boolean }
+                  lastChannel: { type: string }
+                  name: { type: string }
+                  notes: { type: string }
+                  phone_e164: { type: string, pattern: "^\\+[1-9]\\d{1,14}$" }
+                  source: { type: string }
+                  tags: { type: array, items: { type: string } }
+                  updatedAt: { type: string, format: date-time }
+                  error: { type: boolean }
+                required: ["isRegistered", "phone_e164", "digits", "error"]
+
+  - name: pending_contacts_upsert
+    description: "SMS intake upsert endpoint - writes new pending contacts"
+    method: POST
+    path: /pending-contacts/upsert
+    auth: env(INTAKE_WRITE_TOKEN)
+    fallback_auth:
+      - env(INTAKE_SECRET)
+    headers:
+      - Authorization: Bearer <token>
+      - Authorization: <token>
+    io:
+      input:
+        type: object
+        required:
+          - raw_number
+          - phone_number
+          - business_name
+          - contact_name
+          - contact_email
+          - contact_method
+          - is_repeat
+          - last_contact_date
+          - created_date
+          - call_count
+          - license_number
+          - business_address
+          - trade_type
+          - business_type
+          - language_used
+        properties:
+          raw_number: { type: string, description: "Original phone number as provided" }
+          phone_number: { type: string, description: "Normalized E.164 phone number" }
+          business_name: { type: string }
+          contact_name: { type: string }
+          contact_email: { type: string, format: email }
+          contact_method: { type: string, enum: ["text", "phone", "email"] }
+          is_repeat: { type: boolean }
+          last_contact_date: { type: string }
+          created_date: { type: string }
+          call_count: { type: integer, minimum: 0 }
+          license_number: { type: string }
+          business_address: { type: string }
+          trade_type: { type: string }
+          business_type: { type: string, enum: ["LLC", "INC.", "Sole Proprietorship"] }
+          language_used: { type: string }
+      output:
+        type: object
+        required: ["ok"]
+        properties:
+          ok: { type: boolean }
+          id: { type: string, description: "Firestore document ID" }
+          error: { type: string }
+          details: { type: array, items: { type: string } }
+
+  - name: contacts_lookup
+    description: "Optional read-only contact lookup for tools"
+    method: POST
+    path: /contacts/lookup
+    auth: env(READ_SECRET)
+    headers:
+      - Authorization: Bearer <token>
+    io:
+      input:
+        type: object
+        properties:
+          phone_e164: { type: string, pattern: "^\\+[1-9]\\d{1,14}$" }
+          phone: { type: string }
+        oneOf:
+          - required: ["phone_e164"]
+          - required: ["phone"]
+      output:
+        oneOf:
+          - type: "null"
+          - type: object
+            properties:
+              phone_e164: { type: string }
+              name: { type: string }
+              business: { type: string }
+              cslb: { type: string }
+              isRegistered: { type: boolean }
+
+  - name: health_check
+    description: "Health check endpoint"
+    method: GET
+    path: /healthz
+    auth: none
+    io:
+      input: {}
+      output:
+        type: object
+        properties:
+          status: { type: string, enum: ["healthy"] }
+          timestamp: { type: string, format: date-time }
+          service: { type: string }
+          version: { type: string }

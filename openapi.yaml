@@ -1,0 +1,452 @@
+openapi: 3.0.3
+info:
+  title: BBP Tool Center API
+  description: |
+    Google Cloud Run-based Tool Center providing read-only client data to ElevenLabs agents 
+    and write endpoints for SMS Intake to populate Firestore pending_contacts.
+    
+    ## Authentication
+    - Client Data: Uses `CALLER_INIT_TOKEN_V2` (with fallbacks)
+    - Write Operations: Uses `INTAKE_WRITE_TOKEN`
+    - Read Operations: Uses `READ_SECRET`
+    
+    ## Headers Accepted
+    - `Authorization: Bearer <token>`
+    - `Authorization: <token>` (fallback)
+    - `X-Auth-Token: <token>` (secondary fallback)
+  version: 1.0.0
+  contact:
+    name: BBP Tool Center
+    url: https://github.com/andrew-freeland/11labs-toolcenter
+
+servers:
+  - url: https://caller-registry-1085614446627-1085614446627.us-central1.run.app
+    description: Production server
+
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      description: Returns service health status
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /elevenlabs/client-data:
+    post:
+      summary: ElevenLabs client initiation data webhook
+      description: |
+        Provides caller context data for ElevenLabs agents. Returns memorycaller_status 
+        with allowed fields only. Used by ContractSpecialist agent.
+      operationId: getClientData
+      security:
+        - BearerAuth: []
+        - RawAuth: []
+        - XAuthToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientDataRequest'
+            examples:
+              telephony:
+                summary: ElevenLabs telephony format
+                value:
+                  telephony:
+                    from: "+14155551212"
+              twilio:
+                summary: Twilio format
+                value:
+                  twilio:
+                    From: "+14155551212"
+              direct:
+                summary: Direct format
+                value:
+                  from: "+14155551212"
+      responses:
+        '200':
+          description: Client data retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientDataResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /contacts/lookup:
+    post:
+      summary: Contact lookup (optional)
+      description: Read-only contact lookup for tools
+      operationId: lookupContact
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContactLookupRequest'
+      responses:
+        '200':
+          description: Contact found or not found
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ContactLookupResponse'
+                  - type: "null"
+        '400':
+          description: Invalid phone number
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /pending-contacts/upsert:
+    post:
+      summary: SMS intake upsert
+      description: |
+        Creates new pending contact from SMS intake. Validates all required fields
+        and normalizes data before storing in Firestore.
+      operationId: upsertPendingContact
+      security:
+        - WriteAuth: []
+        - WriteAuthRaw: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PendingContactRequest'
+      responses:
+        '200':
+          description: Contact created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpsertResponse'
+        '400':
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpsertErrorResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Bearer token authentication
+    RawAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: Raw token in Authorization header
+    XAuthToken:
+      type: apiKey
+      in: header
+      name: X-Auth-Token
+      description: Token in X-Auth-Token header
+    WriteAuth:
+      type: http
+      scheme: bearer
+      description: Write token for intake operations
+    WriteAuthRaw:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: Raw write token in Authorization header
+
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, timestamp, service, version]
+      properties:
+        status:
+          type: string
+          enum: [healthy]
+        timestamp:
+          type: string
+          format: date-time
+        service:
+          type: string
+          example: "tool-center-api"
+        version:
+          type: string
+          example: "1.0.0"
+
+    ClientDataRequest:
+      type: object
+      oneOf:
+        - type: object
+          required: [telephony]
+          properties:
+            telephony:
+              type: object
+              required: [from]
+              properties:
+                from:
+                  type: string
+                  pattern: "^\\+[1-9]\\d{1,14}$"
+                  example: "+14155551212"
+        - type: object
+          required: [twilio]
+          properties:
+            twilio:
+              type: object
+              required: [From]
+              properties:
+                From:
+                  type: string
+                  pattern: "^\\+[1-9]\\d{1,14}$"
+                  example: "+14155551212"
+        - type: object
+          required: [from]
+          properties:
+            from:
+              type: string
+              pattern: "^\\+[1-9]\\d{1,14}$"
+              example: "+14155551212"
+
+    ClientDataResponse:
+      type: object
+      required: [type, dynamic_variables]
+      properties:
+        type:
+          type: string
+          enum: [conversation_initiation_client_data]
+        dynamic_variables:
+          type: object
+          properties:
+            memorycaller_status:
+              $ref: '#/components/schemas/MemoryCallerStatus'
+
+    MemoryCallerStatus:
+      type: object
+      required: [isRegistered, phone_e164, digits, error]
+      properties:
+        business:
+          type: string
+          example: "Builder's Business Partner"
+        createdAt:
+          type: string
+          format: date-time
+          example: "2025-09-10T21:25:49.682Z"
+        cslb:
+          type: string
+          example: "1234567"
+        digits:
+          type: string
+          pattern: "^[0-9]+$"
+          example: "14155551212"
+        isRegistered:
+          type: boolean
+          example: true
+        lastChannel:
+          type: string
+          example: "voice"
+        name:
+          type: string
+          example: "John Doe"
+        notes:
+          type: string
+          example: "Preferred contact method is email"
+        phone_e164:
+          type: string
+          pattern: "^\\+[1-9]\\d{1,14}$"
+          example: "+14155551212"
+        source:
+          type: string
+          example: "sms-intake"
+        tags:
+          type: array
+          items:
+            type: string
+          example: ["priority", "founder"]
+        updatedAt:
+          type: string
+          format: date-time
+          example: "2025-09-10T21:26:11.226Z"
+        error:
+          type: boolean
+          example: false
+
+    ContactLookupRequest:
+      type: object
+      oneOf:
+        - required: [phone_e164]
+        - required: [phone]
+      properties:
+        phone_e164:
+          type: string
+          pattern: "^\\+[1-9]\\d{1,14}$"
+          example: "+14155551212"
+        phone:
+          type: string
+          example: "(415) 555-1212"
+
+    ContactLookupResponse:
+      type: object
+      properties:
+        phone_e164:
+          type: string
+          example: "+14155551212"
+        name:
+          type: string
+          example: "John Doe"
+        business:
+          type: string
+          example: "Builder's Business Partner"
+        cslb:
+          type: string
+          example: "1234567"
+        isRegistered:
+          type: boolean
+          example: true
+
+    PendingContactRequest:
+      type: object
+      required:
+        - raw_number
+        - phone_number
+        - business_name
+        - contact_name
+        - contact_email
+        - contact_method
+        - is_repeat
+        - last_contact_date
+        - created_date
+        - call_count
+        - license_number
+        - business_address
+        - trade_type
+        - business_type
+        - language_used
+      properties:
+        raw_number:
+          type: string
+          description: "Original phone number as provided"
+          example: "(415) 555-1212"
+        phone_number:
+          type: string
+          description: "Phone number (will be normalized to E.164)"
+          example: "+14155551212"
+        business_name:
+          type: string
+          example: "ABC Construction LLC"
+        contact_name:
+          type: string
+          example: "John Doe"
+        contact_email:
+          type: string
+          format: email
+          example: "john@abcconstruction.com"
+        contact_method:
+          type: string
+          enum: [text, phone, email]
+          example: "email"
+        is_repeat:
+          type: boolean
+          example: false
+        last_contact_date:
+          type: string
+          example: "2025-09-10"
+        created_date:
+          type: string
+          example: "2025-09-10"
+        call_count:
+          type: integer
+          minimum: 0
+          example: 1
+        license_number:
+          type: string
+          example: "1234567"
+        business_address:
+          type: string
+          example: "123 Main St, San Francisco, CA 94105"
+        trade_type:
+          type: string
+          example: "General Contractor"
+        business_type:
+          type: string
+          enum: [LLC, "INC.", "Sole Proprietorship"]
+          example: "LLC"
+        language_used:
+          type: string
+          example: "English"
+
+    UpsertResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          example: true
+        id:
+          type: string
+          description: "Firestore document ID"
+          example: "abc123def456"
+
+    UpsertErrorResponse:
+      type: object
+      required: [ok, error]
+      properties:
+        ok:
+          type: boolean
+          example: false
+        error:
+          type: string
+          example: "upsert_failed"
+
+    ValidationErrorResponse:
+      type: object
+      required: [ok, error]
+      properties:
+        ok:
+          type: boolean
+          example: false
+        error:
+          type: string
+          example: "validation_failed"
+        details:
+          type: array
+          items:
+            type: string
+          example: ["Missing required field: contact_email", "contact_method must be one of: text, phone, email"]
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: "unauthorized"
