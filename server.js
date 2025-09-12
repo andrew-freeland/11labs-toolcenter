@@ -159,6 +159,100 @@ app.get("/healthz", (_req, res) => {
   });
 });
 
+// ---- ElevenLabs Conversation Initiation Client Data Webhook ----
+/*
+ * Environment Variables Required:
+ * - READ_SECRET: Bearer token for authentication
+ * - CONTACTS_COLLECTION: Firestore collection name (default: "contacts")
+ *
+ * cURL Test Examples:
+ * 
+ * Happy path (registered contact):
+ * curl -s -X POST "$BASE_URL/twilio-init" \
+ *   -H "Content-Type: application/json" \
+ *   -H "Authorization: Bearer $READ_SECRET" \
+ *   -d '{"caller_id":"+14152728956","agent_id":"agent_6801k14az46hfz0r03dnpm97zzt9","called_number":"+18777024493","call_sid":"CA_test"}' | jq
+ *
+ * Unauthorized:
+ * curl -s -X POST "$BASE_URL/twilio-init" \
+ *   -H "Content-Type: application/json" \
+ *   -H "Authorization: Bearer WRONG" \
+ *   -d '{"caller_id":"+14152728956"}' | jq
+ *
+ * New caller (not found):
+ * curl -s -X POST "$BASE_URL/twilio-init" \
+ *   -H "Content-Type: application/json" \
+ *   -H "Authorization: Bearer $READ_SECRET" \
+ *   -d '{"caller_id":"+19999999999"}' | jq
+ */
+app.post("/twilio-init", async (req, res) => {
+  try {
+    // Auth: Require Authorization: Bearer <READ_SECRET>
+    const auth = req.headers.authorization || "";
+    if (!auth.startsWith("Bearer ") || auth.slice(7) !== READ_SECRET) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+
+    const { caller_id, agent_id, called_number, call_sid } = req.body || {};
+    
+    // Normalize caller_id to E.164 format
+    const phone = toE164(caller_id);
+    if (!phone) {
+      return res.status(400).json({ error: "missing caller_id" });
+    }
+
+    // Look up contact doc: contacts/{caller_id} where doc id is E.164 phone
+    const col = CONTACTS;
+    const snap = await db.collection(col).doc(phone).get();
+    const data = snap.exists ? snap.data() : {};
+
+    // Map Firestore fields to dynamic variables (exact field mapping per spec)
+    const dynamic_variables = {
+      // Firestore → dynamic variable mapping
+      customer_name: data?.name || "",                    // name → customer_name
+      business_name: data?.business || "",                // business → business_name  
+      license_number: data?.cslb || "",                   // cslb → license_number
+      phone_e164: data?.phone_e164 || "",                 // phone_e164 → phone_e164
+      last_channel: data?.lastChannel || "",              // lastChannel → last_channel
+      notes: data?.notes || "",                           // notes → notes
+      source: data?.source || "",                         // source → source
+      tags: Array.isArray(data?.tags) ? data.tags : [],  // tags → tags (array)
+      is_registered_contact: !!snap.exists,              // isRegistered → is_registered_contact
+      
+      // System passthroughs
+      system__caller_id: phone,
+      system__called_number: toE164(called_number) || "",
+      system__call_sid: call_sid || ""
+    };
+
+    // conversation_config_override: personalized first message based on registration status
+    const conversation_config_override = snap.exists 
+      ? { 
+          agent: { 
+            first_message: `Hi ${dynamic_variables.customer_name || "there"} — welcome back. How can I help today?`,
+            language: "en" 
+          } 
+        }
+      : { 
+          agent: { 
+            first_message: "Hi! I can help you get started. Are you calling about a new project or an existing one?",
+            language: "en" 
+          } 
+        };
+
+    // Return exact JSON shape required by ElevenLabs
+    return res.json({
+      type: "conversation_initiation_client_data",
+      dynamic_variables,
+      conversation_config_override
+    });
+
+  } catch (e) {
+    console.error("[twilio-init] error:", e);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
 // ---- Conversation Initiation Client Data Webhook (read-only) ----
 app.post("/elevenlabs/client-data", async (req, res) => {
   try {
