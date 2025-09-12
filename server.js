@@ -1,15 +1,18 @@
+// server.js — Node 20, Express, Firestore
+
 import express from "express";
-import { Firestore } from "@google-cloud/firestore";
+import { Firestore, FieldValue } from "@google-cloud/firestore";
 
 const app = express();
+app.use(express.json());
+
 const db = new Firestore();
 
-// Environment variables
-const PORT = process.env.PORT || 8080;
+const READ_SECRET  = process.env.READ_SECRET || "";
+const INTAKE_SECRET = process.env.INTAKE_SECRET || "";
 const CONTACTS = process.env.CONTACTS_COLLECTION || "contacts";
-const PENDING_CONTACTS = process.env.PENDING_CONTACTS_COLLECTION || "pending_contacts";
-
-app.use(express.json());
+const PENDING  = process.env.PENDING_CONTACTS_COLLECTION || "pending_contacts";
+const PORT     = process.env.PORT || 8080;
 
 // Helper function to resolve the expected token from environment
 function expectedTokenFromEnv() {
@@ -39,37 +42,22 @@ function passesClientDataAuth(req) {
   return false;
 }
 
-// Helper function to convert phone number to E164 format
+// ---- helper ----
 function toE164(raw) {
-  if (!raw || typeof raw !== "string") return null;
-  
-  // Remove all non-digit characters
-  const digits = raw.replace(/\D/g, "");
-  
-  // If it starts with 1 and has 11 digits, it's likely US/Canada
-  if (digits.length === 11 && digits.startsWith("1")) {
-    return `+${digits}`;
-  }
-  
-  // If it has 10 digits, assume US/Canada and add +1
-  if (digits.length === 10) {
-    return `+1${digits}`;
-  }
-  
-  // If it already looks like E164 (starts with +)
-  if (raw.startsWith("+")) {
-    return raw;
-  }
-  
-  // For other cases, just add + if it looks like a valid international number
-  if (digits.length >= 7 && digits.length <= 15) {
-    return `+${digits}`;
-  }
-  
-  return null;
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (s.startsWith("+")) return s.replace(/[^\d+]/g, "");
+  const digits = s.replace(/\D/g, "");
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  if (digits.length === 10) return `+1${digits}`;
+  return digits ? `+${digits}` : null;
 }
+const auth = (req, secret) => req.get("Authorization") === `Bearer ${secret}`;
 
-// ElevenLabs Client Initiation Data Webhook
+// ---- health ----
+app.get("/healthz", (_req, res) => res.status(200).send("ok"));
+
+// ---- Conversation Initiation Client Data Webhook (read-only) ----
 app.post("/elevenlabs/client-data", async (req, res) => {
   try {
     if (!passesClientDataAuth(req)) {
@@ -146,11 +134,57 @@ app.post("/elevenlabs/client-data", async (req, res) => {
   }
 });
 
-// Health check endpoint
-app.get("/health", (req, res) => {
-  res.status(200).json({ status: "healthy" });
+// ---- Optional: read-only lookup (for tools) ----
+app.post("/contacts/lookup", async (req, res) => {
+  try {
+    if (!auth(req, READ_SECRET)) return res.status(401).json({ error: "unauthorized" });
+    const e164 = toE164(req.body?.phone_e164 || req.body?.phone);
+    if (!e164) return res.status(400).json({ error: "invalid_phone" });
+
+    const snap = await db.collection(CONTACTS).doc(e164).get();
+    const c = snap.exists ? snap.data() : null;
+    return res.status(200).json(
+      c
+        ? { phone_e164: e164, name: c.name ?? "", business: c.business ?? "", cslb: c.cslb ?? "", isRegistered: !!c.isRegistered }
+        : null
+    );
+  } catch (err) {
+    console.error("lookup error:", err);
+    return res.status(500).json({ error: "lookup_failed" });
+  }
+});
+
+// ---- Writer: SMS intake upsert into pending_contacts ----
+app.post("/pending-contacts/upsert", async (req, res) => {
+  try {
+    if (!auth(req, INTAKE_SECRET)) return res.status(401).json({ error: "unauthorized" });
+
+    const e164 = toE164(req.body?.phone_e164 || req.body?.phone);
+    if (!e164) return res.status(400).json({ error: "invalid_phone" });
+
+    const payload = {
+      phone_e164: e164,
+      name: req.body?.name ?? "",
+      business: req.body?.business ?? "",
+      cslb: req.body?.cslb ?? "",
+      isRegistered: false,
+      status: "pending",
+      submittedBy: "sms-intake",
+      submittedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp()
+    };
+
+    await db.collection(PENDING).doc(e164).set(payload, { merge: true });
+    console.log("[pending upsert] collection=%s id=%s", PENDING, e164);
+    return res.status(200).json({ ok: true, status: "pending" });
+  } catch (err) {
+    console.error("pending upsert error:", err);
+    return res.status(500).json({ error: "upsert_failed" });
+  }
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`svc listening on :${PORT}`);
+  console.log(`contacts collection: ${CONTACTS}`);
+  console.log(`pending collection : ${PENDING}`);
 });
