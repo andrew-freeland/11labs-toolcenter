@@ -415,16 +415,55 @@ app.post("/pending-contacts/upsert", async (req, res) => {
       updatedAt: FieldValue.serverTimestamp()
     };
 
-    // Use auto-generated document ID for better scalability
-    const docRef = await db.collection(PENDING).add(payload);
+    // Use phone number as document ID for better organization and deduplication
+    // CRITICAL: Ensure we're using the phone number as document ID, not auto-generated
+    if (!e164) {
+      logEvent("error", "missing_e164", { 
+        endpoint: "/pending-contacts/upsert",
+        phone_number: normalized.phone_number 
+      });
+      return res.status(400).json({ ok: false, error: "invalid_phone_number_format" });
+    }
+    
+    const docRef = db.collection(PENDING).doc(e164);
+    
+    // Log the document ID being used for debugging
+    logEvent("info", "using_doc_id", { 
+      endpoint: "/pending-contacts/upsert",
+      docId: e164,
+      phone_number: e164 
+    });
+    
+    // Check if document already exists to determine if this is an update
+    const existingDoc = await docRef.get();
+    const isUpdate = existingDoc.exists;
+    
+    if (isUpdate) {
+      // Update existing document, preserving created_date and incrementing call_count
+      const existingData = existingDoc.data();
+      payload.created_date = existingData.created_date; // Preserve original created date
+      payload.call_count = (existingData.call_count || 0) + 1; // Increment call count
+      payload.is_repeat = true; // Mark as repeat contact
+      payload.last_contact_date = new Date().toISOString(); // Update last contact
+    }
+    
+    await docRef.set(payload);
     
     logEvent("info", "upsert_ok", { 
       endpoint: "/pending-contacts/upsert",
-      docId: docRef.id,
-      phone_number: e164
+      docId: e164,
+      phone_number: e164,
+      isUpdate: isUpdate,
+      callCount: payload.call_count
     });
     
-    return res.status(200).json({ ok: true, id: docRef.id });
+    // Return response with phone number as document ID
+    return res.status(200).json({ 
+      ok: true, 
+      id: e164,  // This MUST be the phone number, not a random ID
+      isUpdate: isUpdate,
+      callCount: payload.call_count
+    });
   } catch (err) {
     logEvent("error", "upsert_failed", { 
       endpoint: "/pending-contacts/upsert",
