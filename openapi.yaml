@@ -336,73 +336,97 @@ components:
     PendingContactRequest:
       type: object
       required:
-        - raw_number
-        - phone_number
-        - business_name
-        - contact_name
-        - contact_email
-        - contact_method
-        - is_repeat
-        - last_contact_date
-        - created_date
-        - call_count
-        - license_number
-        - business_address
-        - trade_type
-        - business_type
-        - language_used
+        - phone
+        - company
+        - name
+        - email
+        - location
+        - constructionType
+        - jobTitle
+        - companySize
+        - painPoints
+        - currentTools
+        - featureInterest
+        - participateFeedback
+        - contactMethod
+        - isRepeat
+        - lastContactDate
+        - createdDate
+        - callCount
+        - licenseNumber
+        - businessType
+        - languageUsed
       properties:
-        raw_number:
+        phone:
           type: string
-          description: "Original phone number as provided"
-          example: "(415) 555-1212"
-        phone_number:
-          type: string
-          description: "Phone number (will be normalized to E.164)"
+          description: "Phone number in E.164 format (used as document ID)"
+          pattern: "^\\+[1-9]\\d{1,14}$"
           example: "+14155551212"
-        business_name:
+        company:
           type: string
           example: "ABC Construction LLC"
-        contact_name:
+        name:
           type: string
           example: "John Doe"
-        contact_email:
+        email:
           type: string
           format: email
           example: "john@abcconstruction.com"
-        contact_method:
+        location:
+          type: string
+          example: "123 Main St, San Francisco, CA 94105"
+        constructionType:
+          type: string
+          example: "General Contractor"
+        jobTitle:
+          type: string
+          example: "Project Manager"
+        companySize:
+          type: string
+          example: "10-50 employees"
+        painPoints:
+          type: string
+          example: "Difficulty tracking project progress"
+        currentTools:
+          type: string
+          example: "Excel spreadsheets"
+        featureInterest:
+          type: array
+          items:
+            type: string
+          example: ["project_management", "scheduling"]
+        participateFeedback:
+          type: boolean
+          example: true
+        contactMethod:
           type: string
           enum: [text, phone, email]
           example: "email"
-        is_repeat:
+        isRepeat:
           type: boolean
           example: false
-        last_contact_date:
+        lastContactDate:
           type: string
-          example: "2025-09-10"
-        created_date:
+          format: date-time
+          example: "2025-01-27T10:30:00.000Z"
+        createdDate:
           type: string
-          example: "2025-09-10"
-        call_count:
+          format: date-time
+          example: "2025-01-27T10:30:00.000Z"
+        callCount:
           type: integer
           minimum: 0
           example: 1
-        license_number:
+        licenseNumber:
           type: string
           example: "1234567"
-        business_address:
-          type: string
-          example: "123 Main St, San Francisco, CA 94105"
-        trade_type:
-          type: string
-          example: "General Contractor"
-        business_type:
+        businessType:
           type: string
           enum: [LLC, "INC.", "Sole Proprietorship"]
           example: "LLC"
-        language_used:
+        languageUsed:
           type: string
-          example: "English"
+          example: "en"
 
     UpsertResponse:
       type: object

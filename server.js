@@ -68,16 +68,16 @@ function logEvent(level, event, details = {}) {
   console.log(JSON.stringify(logEntry));
 }
 
-// Schema validation for pending contacts
+// Schema validation for pending contacts - Updated for unified ElevenLabs structure
 function validatePendingContact(data) {
   const errors = [];
   
-  // Required fields validation
+  // Required fields validation - Updated to new camelCase structure
   const requiredFields = [
-    'raw_number', 'phone_number', 'business_name', 'contact_name', 
-    'contact_email', 'contact_method', 'is_repeat', 'last_contact_date',
-    'created_date', 'call_count', 'license_number', 'business_address',
-    'trade_type', 'business_type', 'language_used'
+    'phone', 'company', 'name', 'email', 'location', 'constructionType',
+    'jobTitle', 'companySize', 'painPoints', 'currentTools', 'featureInterest', 'participateFeedback',
+    'contactMethod', 'isRepeat', 'lastContactDate', 'createdDate', 'callCount',
+    'licenseNumber', 'businessType', 'languageUsed'
   ];
   
   for (const field of requiredFields) {
@@ -86,31 +86,39 @@ function validatePendingContact(data) {
     }
   }
   
-  // Type and format validations
-  if (data.contact_email && !data.contact_email.includes('@')) {
-    errors.push('contact_email must be a valid email address');
+  // Type and format validations - Updated for new field names
+  if (data.email && !data.email.includes('@')) {
+    errors.push('email must be a valid email address');
   }
   
-  if (data.contact_method && !['text', 'phone', 'email'].includes(data.contact_method)) {
-    errors.push('contact_method must be one of: text, phone, email');
+  if (data.contactMethod && !['text', 'phone', 'email'].includes(data.contactMethod)) {
+    errors.push('contactMethod must be one of: text, phone, email');
   }
   
-  if (data.business_type && !['LLC', 'INC.', 'Sole Proprietorship'].includes(data.business_type)) {
-    errors.push('business_type must be one of: LLC, INC., Sole Proprietorship');
+  if (data.businessType && !['LLC', 'INC.', 'Sole Proprietorship'].includes(data.businessType)) {
+    errors.push('businessType must be one of: LLC, INC., Sole Proprietorship');
   }
   
-  if (data.is_repeat !== undefined && typeof data.is_repeat !== 'boolean') {
-    errors.push('is_repeat must be a boolean');
+  if (data.isRepeat !== undefined && typeof data.isRepeat !== 'boolean') {
+    errors.push('isRepeat must be a boolean');
   }
   
-  if (data.call_count !== undefined && (!Number.isInteger(data.call_count) || data.call_count < 0)) {
-    errors.push('call_count must be a non-negative integer');
+  if (data.callCount !== undefined && (!Number.isInteger(data.callCount) || data.callCount < 0)) {
+    errors.push('callCount must be a non-negative integer');
+  }
+  
+  if (data.participateFeedback !== undefined && typeof data.participateFeedback !== 'boolean') {
+    errors.push('participateFeedback must be a boolean');
+  }
+  
+  if (data.featureInterest && !Array.isArray(data.featureInterest)) {
+    errors.push('featureInterest must be an array');
   }
   
   return errors;
 }
 
-// Data normalization helper
+// Data normalization helper - Updated for unified ElevenLabs structure
 function normalizePendingContact(data) {
   const normalized = { ...data };
   
@@ -121,17 +129,17 @@ function normalizePendingContact(data) {
     }
   }
   
-  // Normalize phone number to E164
-  if (normalized.phone_number) {
-    const e164 = toE164(normalized.phone_number);
+  // Normalize phone number to E164 - Updated field name
+  if (normalized.phone) {
+    const e164 = toE164(normalized.phone);
     if (e164) {
-      normalized.phone_number = e164;
+      normalized.phone = e164;
     }
   }
   
-  // Ensure email is lowercase
-  if (normalized.contact_email) {
-    normalized.contact_email = normalized.contact_email.toLowerCase();
+  // Ensure email is lowercase - Updated field name
+  if (normalized.email) {
+    normalized.email = normalized.email.toLowerCase();
   }
   
   return normalized;
@@ -381,32 +389,40 @@ app.post("/pending-contacts/upsert", async (req, res) => {
 
     // Normalize and prepare data
     const normalized = normalizePendingContact(req.body);
-    const e164 = toE164(normalized.phone_number);
+    const e164 = toE164(normalized.phone);
     if (!e164) {
       logEvent("warn", "invalid_phone", { 
         endpoint: "/pending-contacts/upsert", 
-        phone: normalized.phone_number 
+        phone: normalized.phone 
       });
       return res.status(400).json({ ok: false, error: "invalid_phone_number" });
     }
 
-    // Create payload with all required fields
+    // Create payload with all required fields - Updated for unified ElevenLabs structure
     const payload = {
-      raw_number: normalized.raw_number,
-      phone_number: e164,
-      business_name: normalized.business_name,
-      contact_name: normalized.contact_name,
-      contact_email: normalized.contact_email,
-      contact_method: normalized.contact_method,
-      is_repeat: normalized.is_repeat,
-      last_contact_date: normalized.last_contact_date,
-      created_date: normalized.created_date,
-      call_count: normalized.call_count,
-      license_number: normalized.license_number,
-      business_address: normalized.business_address,
-      trade_type: normalized.trade_type,
-      business_type: normalized.business_type,
-      language_used: normalized.language_used,
+      // ElevenLabs Primary Fields (camelCase)
+      phone: e164,
+      company: normalized.company,
+      name: normalized.name,
+      email: normalized.email,
+      location: normalized.location,
+      constructionType: normalized.constructionType,
+      jobTitle: normalized.jobTitle,
+      companySize: normalized.companySize,
+      painPoints: normalized.painPoints,
+      currentTools: normalized.currentTools,
+      featureInterest: normalized.featureInterest,
+      participateFeedback: normalized.participateFeedback,
+      
+      // System Fields (camelCase)
+      contactMethod: normalized.contactMethod,
+      isRepeat: normalized.isRepeat,
+      lastContactDate: normalized.lastContactDate,
+      createdDate: normalized.createdDate,
+      callCount: normalized.callCount,
+      licenseNumber: normalized.licenseNumber,
+      businessType: normalized.businessType,
+      languageUsed: normalized.languageUsed,
       
       // System fields
       status: "pending",
@@ -439,12 +455,12 @@ app.post("/pending-contacts/upsert", async (req, res) => {
     const isUpdate = existingDoc.exists;
     
     if (isUpdate) {
-      // Update existing document, preserving created_date and incrementing call_count
+      // Update existing document, preserving createdDate and incrementing callCount
       const existingData = existingDoc.data();
-      payload.created_date = existingData.created_date; // Preserve original created date
-      payload.call_count = (existingData.call_count || 0) + 1; // Increment call count
-      payload.is_repeat = true; // Mark as repeat contact
-      payload.last_contact_date = new Date().toISOString(); // Update last contact
+      payload.createdDate = existingData.createdDate; // Preserve original created date
+      payload.callCount = (existingData.callCount || 0) + 1; // Increment call count
+      payload.isRepeat = true; // Mark as repeat contact
+      payload.lastContactDate = new Date().toISOString(); // Update last contact
     }
     
     await docRef.set(payload);
@@ -454,7 +470,7 @@ app.post("/pending-contacts/upsert", async (req, res) => {
       docId: e164,
       phone_number: e164,
       isUpdate: isUpdate,
-      callCount: payload.call_count
+      callCount: payload.callCount
     });
     
     // Return response with phone number as document ID
@@ -462,7 +478,7 @@ app.post("/pending-contacts/upsert", async (req, res) => {
       ok: true, 
       id: e164,  // This MUST be the phone number, not a random ID
       isUpdate: isUpdate,
-      callCount: payload.call_count
+      callCount: payload.callCount
     });
   } catch (err) {
     logEvent("error", "upsert_failed", { 
